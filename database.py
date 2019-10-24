@@ -1,15 +1,32 @@
+import logging
 from random import randint
+from threading import Thread
 
 from peewee import *
 from telebot import types
-from threading import Thread
+from urllib3.util import parse_url
 
 import apidrive as drive
 import apigithub as git
 import apitrello as trello
 import config
 
-db = SqliteDatabase("main.db")
+
+def get_database():
+    parsed_url = parse_url(config.db_url)
+
+    # Берём из auth имя пользователя и пароль от БД
+    username, password = parsed_url.auth.split(':')
+
+    return PostgresqlDatabase(
+        parsed_url.path[1:],  # Пропускаем первый "/", так как он не является названием БД
+        host=parsed_url.host,
+        user=username,
+        password=password
+    )
+
+
+db = get_database()
 token_lenght = 10
 
 
@@ -135,8 +152,9 @@ class Team(Model):
 Team.create_table()
 
 # Создание команды организаторов
-if not Team.select().where(Team.name == config.main_name).exists():
-    team = Team.create(name=config.main_name, token=Team.genToken(), balance=0)
+if not Team.select().where(Team.name == config.org_team_name).exists():
+    team = Team.create(name=config.org_team_name, token=Team.genToken(), balance=config.org_team_capacity)
+
 
 # # team = Team.get(Team.name == config.main_name)
 # print(Team.get_by_id(1).name)
@@ -151,6 +169,7 @@ class User(Model):
 
     class Meta:
         database = db
+        table_name = 'bot_user'
 
     @staticmethod
     def add(tg_id, username, first_name, last_name, team):
@@ -175,11 +194,15 @@ User.create_table()
 
 # Добавление админа при запуске бота
 if not User.select().where(User.tg_id == config.tg_id).exists():
+    logging.info('create user', tg_id=config.tg_id,
+                 username=config.tg_username,
+                 first_name=config.firstname,
+                 last_name=config.lastname)
     User.add(tg_id=config.tg_id,
              username=config.tg_username,
              first_name=config.firstname,
              last_name=config.lastname,
-             team=Team.get(Team.name == config.main_name))
+             team=Team.get(Team.name == config.org_team_name))
 
 
 class Document(Model):
@@ -232,15 +255,16 @@ class Document(Model):
         def thread():
             trello.addFile(fileName=self.name, link=drive.getFileLink(self.fileId), team=self.team)
             self.team.sendAll(message="Документ '" + self.name + "' был принят", bot=bot)
+
         Thread(target=thread).start()
 
         self.status = 1
         self.save()
 
     def reject(self, bot):
-
         def thread():
             self.team.sendAll(message="Документ '" + self.name + "' был отклонен", bot=bot)
+
         Thread(target=thread).start()
 
         self.status = -1

@@ -1,9 +1,9 @@
-import os
 import logging
+import os
 
 import telebot
-import apidrive as drive
 
+import apidrive as drive
 import config
 import database as db
 import markups as mk
@@ -41,12 +41,15 @@ def checkUser(function):
             function(message=message, user=user)
         else:
             registration(message)
+
     return the_wrapper_around_the_original_function
+
 
 def getReplyMarkup(number):
     markup = telebot.types.ReplyKeyboardMarkup()
     markup.add(*[str(i) for i in range(number)])
     return markup
+
 
 # Функция создания красивого сообщения - списка из листа команд
 def teamsToMessage(teams):
@@ -102,7 +105,6 @@ def tokenToLink(token):
 
 
 def registration(message):
-
     # Потыкал ссылки вида t.me/abcdbot?start=123 и просто увидел что код идет с 7 символа
     team = db.Team.getTeam(message.text[7:])
     if team != None and team.balance > 0:
@@ -141,7 +143,7 @@ def getSurname(message, team, name):
 @bot.message_handler(commands=['start'])
 @checkUser
 def start(message, user):
-    if user.team.name == config.main_name:
+    if user.team.name == config.org_team_name:
         bot.send_message(message.chat.id,
                          "Добрый день, " + user.first_name + " " + user.last_name + "\nВаш статус - организатор",
                          reply_markup=mk.main_admin)
@@ -155,7 +157,7 @@ def start(message, user):
 @bot.message_handler(commands=['main'])
 @checkUser
 def main_menu(message, user):
-    if user.team.name == config.main_name:
+    if user.team.name == config.org_team_name:
         bot.send_message(message.chat.id, "Главное меню", reply_markup=mk.main_admin)
     else:
         bot.send_message(message.chat.id, "Главное меню", reply_markup=mk.main_user)
@@ -165,7 +167,7 @@ def main_menu(message, user):
 @checkUser
 def add_team(message, user):
     logging.info(getUserInfo(message) + " started creating a team")
-    if user.team.name == config.main_name:
+    if user.team.name == config.org_team_name:
         bot.send_message(message.chat.id, "Регистрация команды")
         bot.send_message(message.chat.id, "Укажите название команды:", reply_markup=mk.back)
         bot.register_next_step_handler(message, getTeamName)
@@ -198,7 +200,7 @@ def getSchool(message, name):
 @bot.message_handler(commands=['editTeam'])
 @checkUser
 def edit_team_menu(message, user):
-    if user.team.name == config.main_name:
+    if user.team.name == config.org_team_name:
         teams = db.Team.getTeamsList()
         bot.send_message(message.chat.id, "Вот список команд на данный момент:")
         bot.send_message(message.chat.id, teamsToMessage(teams), parse_mode='Markdown')
@@ -241,7 +243,7 @@ def editTeam(message, team):
         addTeamMember(message, team)
     elif message.text == 'Удалить участника':
         users = team.getUsersList()
-        if team.name == config.main_name and len(users) == 1:
+        if team.name == config.org_team_name and len(users) == 1:
             bot.send_message(message.chat.id, "В команде организаторов должен быть хотя бы один человек")
             setTeam(message, team)
         elif len(users) > 0:
@@ -255,14 +257,14 @@ def editTeam(message, team):
             bot.send_message(message.chat.id, "Команда пуста".upper())
             setTeam(message, team)
     elif message.text == 'Изменить название':
-        if team.name != config.main_name:
+        if team.name != config.org_team_name:
             bot.send_message(message.chat.id, "Введите новое название команды '" + team.name + "'")
             bot.register_next_step_handler(message=message, callback=changeTeamName, team=team)
         else:
             bot.send_message(message.chat.id, "Изменение названия команды организаторов запрещено")
             setTeam(message, team)
     elif message.text == 'Удалить команду':
-        if team.name != config.main_name:
+        if team.name != config.org_team_name:
             bot.send_message(message.chat.id, "Удаление команды")
             team.remove(bot)
             edit_team_menu(message)
@@ -324,13 +326,17 @@ def addTeamMember(message, team):
 @bot.message_handler(commands=['exit'])
 @checkUser
 def exit(message, user):
+    bot.send_message(message.chat.id, 'Команда отключена :(\nОбратитесь к администратору, чтобы выйти из команды.')
+    return
+
+    # noinspection PyUnreachableCode
     bot.send_message(message.chat.id, "Вы вышли из команды '" + user.team.name + "'")
     bot.send_message(message.chat.id, "У вас больше нет доступа к боту",
                      reply_markup=telebot.types.ReplyKeyboardRemove())
     user.delete_instance()
 
     # Проверка на случай если организаторов нет, в таком случае бот нужно перезапустить, чтобы добавить по умолчанию
-    if len(db.Team.get(db.Team.name == config.main_name).getUsersList()) < 1:
+    if len(db.Team.get(db.Team.name == config.org_team_name).getUsersList()) < 1:
         logging.fatal("Admins team is empty")
         logging.fatal("Shutdown bot".upper())
 
@@ -340,7 +346,7 @@ def exit(message, user):
 @bot.message_handler(commands=['sendDoc'])
 @checkUser
 def sendDocMenu(message, user):
-    if user.team.name != config.main_name:
+    if user.team.name != config.org_team_name:
         bot.send_message(message.chat.id, "Укажите номер документа, которой вы хотите отправить:",
                          reply_markup=getReplyMarkup(len(config.docs)).row('назад'))
         bot.send_message(message.chat.id, listToMessage(config.docs), parse_mode='Markdown')
@@ -377,7 +383,8 @@ def getDoc(message, docName, user):
                                                   "'Открыть доступ', после чего нажмите на 'копировать ссылку общего доступа'")
                 raise Exception
             else:
-                db.Document.add(type=docName, link=message.text, team=user.team, sender=user.first_name + " " + user.last_name)
+                db.Document.add(type=docName, link=message.text, team=user.team,
+                                sender=user.first_name + " " + user.last_name)
                 bot.send_message(message.chat.id, "Ваш документ был успешно отправлен на проверку")
                 main_menu(message)
         else:
@@ -387,11 +394,10 @@ def getDoc(message, docName, user):
         bot.register_next_step_handler(message=message, callback=getDoc, docName=docName, user=user)
 
 
-
 @bot.message_handler(commands=['checkDocs'])
 @checkUser
 def checkDocsMenu(message, user):
-    if user.team.name == config.main_name:
+    if user.team.name == config.org_team_name:
         teams = db.Team.getTeamsDocuments()
         if len(teams) > 0:
             bot.send_message(message.chat.id, "Выберите номер команды, чьи документы вы хотите проверить:")
@@ -448,6 +454,7 @@ def verifyDocument(message, document, team, number):
     elif message.text == 'Главное меню':
         main_menu(message)
 
+
 def addMessage(message, document, team, accept):
     if message.text == "Да":
         bot.send_message(message.chat.id, "Введите комментарий для отправки команде",
@@ -476,7 +483,7 @@ def getDocumentMessage(message, document, accept):
 @bot.message_handler(commands=['getTeamInfo'])
 @checkUser
 def getTeamInfo(message, user):
-    if user.team.name != config.main_name:
+    if user.team.name != config.org_team_name:
         bot.send_message(message.chat.id, "Список участников команды '" + user.team.name + "'")
         bot.send_message(message.chat.id, usersToMessage(user.team.getUsersList()), parse_mode='Markdown')
         bot.send_message(message.chat.id, "Отправленные документы вашей команды:")
@@ -486,7 +493,7 @@ def getTeamInfo(message, user):
 @bot.message_handler(commands=['help'])
 @checkUser
 def help(message, user):
-    if user.team.name != config.main_name:
+    if user.team.name != config.org_team_name:
         bot.send_message(message.chat.id,
                          "/sendDoc - Отправить документ на проверку\n\n" +
                          "/getTeamInfo - Получить список своей команды и информацию об отправленных документах\n\n" +
@@ -500,13 +507,15 @@ def help(message, user):
                          "/exit - Выход из команды организаторов(вы не сможете вернуться самостоятельно)\n\n" +
                          "/help - Получить инструкцию")
 
+
 @bot.message_handler(commands=['sendAll'])
 @checkUser
 def getMessage(message, user):
-    if user.team.name == config.main_name:
+    if user.team.name == config.org_team_name:
         bot.send_message(message.chat.id, "Отправьте сообщение, которое вы хотите разослать:",
                          reply_markup=mk.back)
         bot.register_next_step_handler(message=message, callback=sendAll, user=user)
+
 
 def sendAll(message, user, team=None):
     if team == None:
@@ -514,7 +523,7 @@ def sendAll(message, user, team=None):
             main_menu(message)
         else:
             for team in db.Team.select():
-                if team.name != config.main_name:
+                if team.name != config.org_team_name:
                     team.sendAll("Сообщение от " + user.first_name + " " + user.last_name + ": " + message.text, bot)
             bot.send_message(message.chat.id, "Сообщение '" + message.text + "' было отправлено всем участникам")
             main_menu(message)

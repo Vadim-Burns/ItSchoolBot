@@ -15,6 +15,9 @@ import config
 APPLICATION_NAME = 'ItSchoolBot'
 credentials_file = 'drive-secret.json'
 
+with open(credentials_file, 'w+') as f:
+    f.write(config.gdrive_secret)
+
 credentials = Storage(credentials_file).get()
 http = credentials.authorize(httplib2.Http())
 service = discovery.build('drive', 'v3', http=http)
@@ -37,7 +40,7 @@ googleTypes = {'application/vnd.google-apps.document': ['application/pdf', ".pdf
 
 
 def getMainFolder():
-    folders = service.files().list(q='name = "' + config.main_name + '" and trashed = False',
+    folders = service.files().list(q='name = "' + config.org_team_name + '" and trashed = False',
                                    fields='files(id)').execute().get('files')
     if len(folders) > 0:
         return folders[0].get('id')
@@ -47,7 +50,7 @@ def getMainFolder():
 
 def createMainFolder():
     file_metadata = {
-        'name': config.main_name,
+        'name': config.org_team_name,
         'mimeType': 'application/vnd.google-apps.folder'
     }
     return service.files().create(body=file_metadata, fields='id').execute().get('id')
@@ -72,9 +75,9 @@ def createFolder(team):
     }
     folder = service.files().create(body=file_metadata, fields='id, parents').execute()
     team.driveFolder = service.files().update(fileId=folder.get('id'),
-                                  addParents=mainFolder,
-                                  removeParents=folder.get('parents')[0],
-                                  fields='id').execute().get('id')
+                                              addParents=mainFolder,
+                                              removeParents=folder.get('parents')[0],
+                                              fields='id').execute().get('id')
     team.save()
     return team.driveFolder
 
@@ -209,6 +212,7 @@ def uploadFolderToGithub(folderId, name, team, path=""):
                            path=path + name + "/")
         else:
             uploadFolderToGithub(item.get('id'), name=fileInfo.get('name'), team=team, path=path + name + "/")
+
 
 def isValidLink(link):
     try:
